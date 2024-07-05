@@ -71,8 +71,6 @@ typedef struct {
 
   colnr_T vcol;              ///< virtual column, before wrapping
   int col;                   ///< visual column on screen, after wrapping
-  int boguscols;             ///< nonexistent columns added to "col" to force wrapping
-  int old_boguscols;         ///< bogus boguscols
   int vcol_off_co;           ///< offset for concealed characters
 
   int off;                   ///< offset relative start of line
@@ -865,15 +863,6 @@ static void win_line_start(win_T *wp, winlinevars_T *wlv)
   }
 }
 
-static void fix_for_boguscols(winlinevars_T *wlv)
-{
-  wlv->n_extra += wlv->vcol_off_co;
-  wlv->vcol -= wlv->vcol_off_co;
-  wlv->vcol_off_co = 0;
-  wlv->col -= wlv->boguscols;
-  wlv->old_boguscols = wlv->boguscols;
-  wlv->boguscols = 0;
-}
 
 static int get_rightmost_vcol(win_T *wp, const int *color_cols)
 {
@@ -1002,7 +991,6 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, s
     .fromcol = -10,
     .tocol = MAXCOL,
     .vcol_sbr = -1,
-    .old_boguscols = 0,
   };
 
   buf_T *buf = wp->w_buffer;
@@ -2133,10 +2121,6 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, s
           wlv.sc_extra = schar_from_ascii(mb_off > 0 ? MB_FILLER_CHAR : ' ');
           wlv.sc_final = NUL;
           if (mb_c < 128 && ascii_iswhite(mb_c)) {
-            if (mb_c == TAB) {
-              // See "Tab alignment" below.
-              fix_for_boguscols(&wlv);
-            }
             if (!wp->w_p_list) {
               mb_c = ' ';
               mb_schar = schar_from_ascii(mb_c);
@@ -2228,11 +2212,6 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, s
               // there are characters to conceal
               tab_len += wlv.vcol_off_co;
             }
-            // boguscols before fix_for_boguscols() from above.
-            if (wp->w_p_lcs_chars.tab1 && wlv.old_boguscols > 0
-                && wlv.n_extra > tab_len) {
-              tab_len += wlv.n_extra - tab_len;
-            }
 
             if (tab_len > 0) {
               // If wlv.n_extra > 0, it gives the number of chars
@@ -2266,25 +2245,11 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, s
                 size_t slen = schar_get_adv(&p, lcs);
                 wlv.n_extra += (int)slen - (saved_nextra > 0 ? 1 : 0);
               }
-
-              // n_extra will be increased by fix_for_boguscols()
-              // below, so need to adjust for that here
-              if (wlv.vcol_off_co > 0) {
-                wlv.n_extra -= wlv.vcol_off_co;
-              }
             }
           }
 
           {
             int vc_saved = wlv.vcol_off_co;
-
-            // Tab alignment should be identical regardless of
-            // 'conceallevel' value. So tab compensates of all
-            // previous concealed characters, and thus resets
-            // vcol_off_co and boguscols accumulated so far in the
-            // line. Note that the tab can be longer than
-            // 'tabstop' when there are concealed characters.
-            fix_for_boguscols(&wlv);
 
             // Make sure, the highlighting for the tab char will be
             // correctly set further below (effectively reverts the
@@ -2426,10 +2391,6 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, s
             wlv.vcol_off_co += wlv.n_extra;
           }
           wlv.vcol += wlv.n_extra;
-          if (is_wrapped && wlv.n_extra > 0) {
-            wlv.boguscols += wlv.n_extra;
-            wlv.col += wlv.n_extra;
-          }
           wlv.n_extra = 0;
           wlv.n_attr = 0;
         } else if (wlv.skip_cells == 0) {
@@ -2455,7 +2416,6 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, s
         && wp == curwin && lnum == wp->w_cursor.lnum
         && conceal_cursor_line(wp)
         && (wlv.vcol + wlv.skip_cells >= wp->w_virtcol || mb_schar == NUL)) {
-      wp->w_wcol = wlv.col - wlv.boguscols;
       if (wlv.vcol + wlv.skip_cells < wp->w_virtcol) {
         // Cursor beyond end of the line with 'virtualedit'.
         wp->w_wcol += wp->w_virtcol - wlv.vcol - wlv.skip_cells;
@@ -2563,11 +2523,6 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, s
       if (wlv.vcol < start_col + wlv.col - win_col_off(wp)) {
         wlv.vcol = start_col + wlv.col - win_col_off(wp);
       }
-      // Get rid of the boguscols now, we want to draw until the right
-      // edge for 'cursorcolumn'.
-      wlv.col -= wlv.boguscols;
-      wlv.boguscols = 0;
-
       advance_color_col(&wlv, vcol_hlc(wlv));
 
       // Make sure alignment is the same regardless
@@ -2763,40 +2718,10 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, s
         wlv.vcol_off_co += wlv.n_extra;
       }
 
-      if (is_wrapped) {
-        // Special voodoo required if 'wrap' is on.
-        //
-        // Advance the column indicator to force the line
-        // drawing to wrap early. This will make the line
-        // take up the same screen space when parts are concealed,
-        // so that cursor line computations aren't messed up.
-        //
-        // To avoid the fictitious advance of 'wlv.col' causing
-        // trailing junk to be written out of the screen line
-        // we are building, 'boguscols' keeps track of the number
-        // of bad columns we have advanced.
-        if (wlv.n_extra > 0) {
-          wlv.vcol += wlv.n_extra;
-          wlv.col += wlv.n_extra;
-          wlv.boguscols += wlv.n_extra;
-          wlv.n_extra = 0;
-          wlv.n_attr = 0;
-        }
-
-        if (concealed_wide) {
-          // Need to fill two screen columns.
-          wlv.boguscols++;
-          wlv.col++;
-        }
-
-        wlv.boguscols++;
-        wlv.col++;
-      } else {
-        if (wlv.n_extra > 0) {
-          wlv.vcol += wlv.n_extra;
-          wlv.n_extra = 0;
-          wlv.n_attr = 0;
-        }
+      if (wlv.n_extra > 0) {
+        wlv.vcol += wlv.n_extra;
+        wlv.n_extra = 0;
+        wlv.n_attr = 0;
       }
     } else {
       wlv.skip_cells--;
@@ -2861,14 +2786,14 @@ end_check:
                             || ui_has(kUIMultigrid))  // or has dedicated grid.
                         && !wp->w_p_rl;               // Not right-to-left.
 
-      int draw_col = wlv.col - wlv.boguscols;
+      int draw_col = wlv.col;
 
       for (int i = draw_col; i < grid->cols; i++) {
         linebuf_vcol[wlv.off + (i - draw_col)] = wlv.vcol - 1;
       }
 
       // Apply 'cursorline' highlight.
-      if (wlv.boguscols != 0 && (wlv.line_attr_lowprio != 0 || wlv.line_attr != 0)) {
+      if (wlv.line_attr_lowprio != 0 || wlv.line_attr != 0) {
         int attr = hl_combine_attr(wlv.line_attr_lowprio, wlv.line_attr);
         while (draw_col < grid->cols) {
           linebuf_char[wlv.off] = schar_from_char(' ');
@@ -2897,7 +2822,6 @@ end_check:
         current_grid->attrs[current_grid->line_offset[current_row + 1]] = -1;
       }
 
-      wlv.boguscols = 0;
       wlv.vcol_off_co = 0;
       wlv.row++;
 

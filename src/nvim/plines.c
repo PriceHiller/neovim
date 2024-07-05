@@ -13,6 +13,7 @@
 #include "nvim/decoration.h"
 #include "nvim/decoration_defs.h"
 #include "nvim/diff.h"
+#include "nvim/drawscreen.h"
 #include "nvim/fold.h"
 #include "nvim/globals.h"
 #include "nvim/indent.h"
@@ -80,7 +81,7 @@ int linetabsize(win_T *wp, linenr_T lnum)
   return win_linetabsize(wp, lnum, ml_get_buf(wp->w_buffer, lnum), MAXCOL);
 }
 
-static const uint32_t inline_filter[4] = {[kMTMetaInline] = kMTFilterSelect };
+static const uint32_t inline_filter[4] = { [kMTMetaInline] = kMTFilterSelect };
 
 /// Prepare the structure passed to charsize functions.
 ///
@@ -98,8 +99,8 @@ CSType init_charsize_arg(CharsizeArg *csarg, win_T *wp, linenr_T lnum, char *lin
   csarg->use_tabstop = !wp->w_p_list || wp->w_p_lcs_chars.tab1;
 
   if (lnum > 0) {
-    if (marktree_itr_get_filter(wp->w_buffer->b_marktree, lnum - 1, 0, lnum, 0,
-                                inline_filter, csarg->iter)) {
+    if (marktree_itr_get_filter(wp->w_buffer->b_marktree, lnum - 1, 0, lnum, 0, inline_filter,
+                                csarg->iter)) {
       csarg->virt_row = lnum - 1;
     }
   }
@@ -265,8 +266,7 @@ CharSize charsize_regular(CharsizeArg *csarg, char *const cur, colnr_T const vco
         if (max_head_vcol == 0 || vcol + size + added < max_head_vcol) {
           head += cnt * head_mid;
         } else if (max_head_vcol > vcol + head_prev + prev_rem) {
-          head += (max_head_vcol - (vcol + head_prev + prev_rem)
-                   + width2 - 1) / width2 * head_mid;
+          head += (max_head_vcol - (vcol + head_prev + prev_rem) + width2 - 1) / width2 * head_mid;
         } else if (max_head_vcol < 0) {
           int off = virt_text_cursor_off(csarg, *cur == NUL);
           if (off >= prev_rem) {
@@ -286,8 +286,8 @@ CharSize charsize_regular(CharsizeArg *csarg, char *const cur, colnr_T const vco
   bool need_lbr = false;
   // If 'linebreak' set check at a blank before a non-blank if the line
   // needs a break here.
-  if (wp->w_p_lbr && wp->w_p_wrap && wp->w_width_inner != 0
-      && vim_isbreak((uint8_t)cur[0]) && !vim_isbreak((uint8_t)cur[1])) {
+  if (wp->w_p_lbr && wp->w_p_wrap && wp->w_width_inner != 0 && vim_isbreak((uint8_t)cur[0])
+      && !vim_isbreak((uint8_t)cur[1])) {
     char *t = csarg->line;
     while (vim_isbreak((uint8_t)t[0])) {
       t++;
@@ -315,8 +315,7 @@ CharSize charsize_regular(CharsizeArg *csarg, char *const cur, colnr_T const vco
       char *ps = s;
       MB_PTR_ADV(s);
       int c = (uint8_t)(*s);
-      if (!(c != NUL
-            && (vim_isbreak(c) || vcol2 == vcol || !vim_isbreak((uint8_t)(*ps))))) {
+      if (!(c != NUL && (vim_isbreak(c) || vcol2 == vcol || !vim_isbreak((uint8_t)(*ps))))) {
         break;
       }
 
@@ -344,10 +343,8 @@ static inline CharSize charsize_fast_impl(win_T *const wp, bool use_tabstop, col
 {
   // A tab gets expanded, depending on the current column
   if (cur_char == TAB && use_tabstop) {
-    return (CharSize){
-      .width = tabstop_padding(vcol, wp->w_buffer->b_p_ts,
-                               wp->w_buffer->b_p_vts_array)
-    };
+    return (CharSize){ .width
+                       = tabstop_padding(vcol, wp->w_buffer->b_p_ts, wp->w_buffer->b_p_vts_array) };
   } else {
     int width;
     if (cur_char < 0) {
@@ -372,8 +369,8 @@ static inline CharSize charsize_fast_impl(win_T *const wp, bool use_tabstop, col
 /// Can be used if CSType is kCharsizeFast.
 ///
 /// @see charsize_regular
-CharSize charsize_fast(CharsizeArg *csarg, colnr_T const vcol, int32_t const cur_char)
-  FUNC_ATTR_PURE
+CharSize charsize_fast(CharsizeArg *csarg, colnr_T const vcol,
+                       int32_t const cur_char) FUNC_ATTR_PURE
 {
   return charsize_fast_impl(csarg->win, csarg->use_tabstop, vcol, cur_char);
 }
@@ -396,8 +393,8 @@ int charsize_nowrap(buf_T *buf, bool use_tabstop, colnr_T vcol, int32_t cur_char
 ///
 /// @param  wp    window
 /// @param  vcol  column number
-static bool in_win_border(win_T *wp, colnr_T vcol)
-  FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ARG(1)
+static bool in_win_border(win_T *wp, colnr_T vcol) FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
+  FUNC_ATTR_NONNULL_ARG(1)
 {
   if (wp->w_width_inner == 0) {
     // there is no border
@@ -569,10 +566,7 @@ void getvcol(win_T *wp, pos_T *pos, colnr_T *start, colnr_T *cursor, colnr_T *en
   }
 
   if (cursor != NULL) {
-    if (ci.chr.value == TAB
-        && (State & MODE_NORMAL)
-        && !wp->w_p_list
-        && !virtual_active(wp)
+    if (ci.chr.value == TAB && (State & MODE_NORMAL) && !wp->w_p_list && !virtual_active(wp)
         && !(VIsual_active && ((*p_sel == 'e') || ltoreq(*pos, VIsual)))) {
       // cursor at end
       *cursor = vcol + incr - 1;
@@ -701,8 +695,7 @@ void getvcols(win_T *wp, pos_T *pos1, pos_T *pos2, colnr_T *left, colnr_T *right
 /// Check if there may be filler lines anywhere in window "wp".
 bool win_may_fill(win_T *wp)
 {
-  return ((wp->w_p_diff && diffopt_filler())
-          || buf_meta_total(wp->w_buffer, kMTMetaLines));
+  return ((wp->w_p_diff && diffopt_filler()) || buf_meta_total(wp->w_buffer, kMTMetaLines));
 }
 
 /// Return the number of filler lines above "lnum".
@@ -753,6 +746,15 @@ int plines_win_nofill(win_T *wp, linenr_T lnum, bool limit_winheight)
   // Folded lines are handled just like an empty line.
   if (lineFolded(wp, lnum)) {
     return 1;
+  }
+
+  if (wp->w_p_cole > 0) {
+    for (int i = 0; i < wp->w_lines_valid && i < Rows; i++) {
+      wline_T winline = wp->w_lines[i];
+      if (winline.wl_valid && winline.wl_lnum == lnum) {
+        return winline.wl_size;
+      }
+    }
   }
 
   const int lines = plines_win_nofold(wp, lnum);
@@ -878,8 +880,8 @@ int plines_win_full(win_T *wp, linenr_T lnum, linenr_T *const nextp, bool *const
   if (foldedp != NULL) {
     *foldedp = folded;
   }
-  return ((folded ? 1 : plines_win_nofill(wp, lnum, limit_winheight)) +
-          (lnum == wp->w_topline ? wp->w_topfill : win_get_fill(wp, lnum)));
+  return ((folded ? 1 : plines_win_nofill(wp, lnum, limit_winheight))
+          + (lnum == wp->w_topline ? wp->w_topfill : win_get_fill(wp, lnum)));
 }
 
 /// Return number of window lines a physical line range will occupy in window "wp".
@@ -940,9 +942,8 @@ int64_t win_text_height(win_T *const wp, const linenr_T start_lnum, const int64_
     const bool folded = hasFolding(wp, lnum, &lnum, &lnum_next);
     height_cur_nofill = folded ? 1 : plines_win_nofill(wp, lnum, false);
     height_sum_nofill += height_cur_nofill;
-    const int64_t row_off = (start_vcol < width1 || width2 <= 0)
-                            ? 0
-                            : 1 + (start_vcol - width1) / width2;
+    const int64_t row_off
+      = (start_vcol < width1 || width2 <= 0) ? 0 : 1 + (start_vcol - width1) / width2;
     height_sum_nofill -= MIN(row_off, height_cur_nofill);
     lnum = lnum_next + 1;
   }
@@ -958,11 +959,10 @@ int64_t win_text_height(win_T *const wp, const linenr_T start_lnum, const int64_
 
   if (end_vcol >= 0) {
     height_sum_nofill -= height_cur_nofill;
-    const int64_t row_off = end_vcol == 0
-                            ? 0
+    const int64_t row_off = end_vcol == 0 ? 0
                             : (end_vcol <= width1 || width2 <= 0)
-                            ? 1
-                            : 1 + (end_vcol - width1 + width2 - 1) / width2;
+                              ? 1
+                              : 1 + (end_vcol - width1 + width2 - 1) / width2;
     height_sum_nofill += MIN(row_off, height_cur_nofill);
   }
 
